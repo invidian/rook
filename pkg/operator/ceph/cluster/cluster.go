@@ -136,8 +136,9 @@ func (c *cluster) detectCephVersion(image string, timeout time.Duration) (*cephv
 	return version, nil
 }
 
-func (c *cluster) createInstance(rookImage string, cephVersion cephver.CephVersion) error {
+func (c *cluster) createInstance(rookImage string, cephVersion cephver.CephVersion, state cephv1.ClusterState, name string) (bool, error) {
 	var err error
+	var success bool
 	c.setOrchestrationNeeded()
 
 	// execute an orchestration until
@@ -149,13 +150,24 @@ func (c *cluster) createInstance(rookImage string, cephVersion cephver.CephVersi
 		}
 		// Use a DeepCopy of the spec to avoid using an inconsistent data-set
 		spec := c.Spec.DeepCopy()
-
+		err = c.updateClusterStatus(state, c.Namespace, name, "")
+		if err != nil {
+			logger.Errorf("failed to update cluster status in namespace %s: %+v", c.Namespace, err)
+		}
 		err = c.doOrchestration(rookImage, cephVersion, spec)
-
+		if err == nil {
+			err = c.updateClusterStatus(cephv1.ClusterStateCreated, c.Namespace, name, "")
+			if err != nil {
+				logger.Errorf("failed to update cluster status in namespace %s: %+v", c.Namespace, err)
+			}
+		}
 		c.unsetOrchestrationStatus()
 	}
 
-	return err
+	if err == nil {
+		success = true
+	}
+	return success, err
 }
 
 func (c *cluster) doOrchestration(rookImage string, cephVersion cephver.CephVersion, spec *cephv1.ClusterSpec) error {
@@ -324,4 +336,20 @@ func (c *cluster) checkSetOrchestrationStatus() bool {
 	}
 
 	return false
+}
+
+func (c *cluster) updateClusterStatus(state cephv1.ClusterState, namespace string, name string, message string) error {
+	// get the most recent cluster CRD object
+	cluster, err := c.context.RookClientset.CephV1().CephClusters(namespace).Get(name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get cluster from namespace %s prior to updating its status: %+v", c.Namespace, err)
+	}
+
+	// update the status on the retrieved cluster object
+	cluster.Status = cephv1.ClusterStatus{State: state, Message: message}
+	if _, err := c.context.RookClientset.CephV1().CephClusters(cluster.Namespace).Update(cluster); err != nil {
+		return fmt.Errorf("failed to update cluster %s status: %+v", cluster.Namespace, err)
+	}
+
+	return nil
 }
