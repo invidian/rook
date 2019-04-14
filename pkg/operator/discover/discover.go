@@ -41,6 +41,7 @@ const (
 	discoverDaemonsetName             = "rook-discover"
 	discoverDaemonsetTolerationEnv    = "DISCOVER_TOLERATION"
 	discoverDaemonsetTolerationKeyEnv = "DISCOVER_TOLERATION_KEY"
+	discoverDaemonsetTolerationsEnv   = "DISCOVER_TOLERATIONS"
 	deviceInUseCMName                 = "local-device-in-use-cluster-%s-node-%s"
 	deviceInUseAppName                = "rook-claimed-devices"
 	deviceInUseClusterAttr            = "rook.io/cluster"
@@ -161,6 +162,7 @@ func (d *Discover) createDiscoverDaemonSet(namespace, discoverImage, securityAcc
 	// Add toleration if any
 	tolerationValue := os.Getenv(discoverDaemonsetTolerationEnv)
 	if tolerationValue != "" {
+		logger.Warningf("%s and %s are deprecated. Use %s instead.", discoverDaemonsetTolerationEnv, discoverDaemonsetTolerationKeyEnv, discoverDaemonsetTolerationsEnv)
 		ds.Spec.Template.Spec.Tolerations = []v1.Toleration{
 			{
 				Effect:   v1.TaintEffect(tolerationValue),
@@ -170,7 +172,15 @@ func (d *Discover) createDiscoverDaemonSet(namespace, discoverImage, securityAcc
 		}
 	}
 
-	_, err := d.clientset.AppsV1().DaemonSets(namespace).Create(ds)
+	var tolerations []v1.Toleration
+	tolerationsRaw := os.Getenv(discoverDaemonsetTolerationsEnv)
+	err := k8sutil.YamlToTolerations(tolerationsRaw, &tolerations)
+	if err != nil {
+		logger.Warningf("failed to parse %s", tolerationsRaw)
+	}
+	ds.Spec.Template.Spec.Tolerations = append(ds.Spec.Template.Spec.Tolerations, tolerations...)
+
+	_, err = d.clientset.AppsV1().DaemonSets(namespace).Create(ds)
 	if err != nil {
 		if !kserrors.IsAlreadyExists(err) {
 			return fmt.Errorf("failed to create rook-discover daemon set. %+v", err)

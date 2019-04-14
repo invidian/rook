@@ -41,6 +41,7 @@ const (
 	flexvolumeDefaultDirPath       = "/usr/libexec/kubernetes/kubelet-plugins/volume/exec/"
 	agentDaemonsetTolerationEnv    = "AGENT_TOLERATION"
 	agentDaemonsetTolerationKeyEnv = "AGENT_TOLERATION_KEY"
+	agentDaemonsetTolerationsEnv   = "AGENT_TOLERATIONS"
 	AgentMountSecurityModeEnv      = "AGENT_MOUNT_SECURITY_MODE"
 	RookEnableSelinuxRelabelingEnv = "ROOK_ENABLE_SELINUX_RELABELING"
 	RookEnableFSGroupEnv           = "ROOK_ENABLE_FSGROUP"
@@ -231,6 +232,7 @@ func (a *Agent) createAgentDaemonSet(namespace, agentImage, serviceAccount strin
 	// Add toleration if any
 	tolerationValue := os.Getenv(agentDaemonsetTolerationEnv)
 	if tolerationValue != "" {
+		logger.Warningf("%s and %s are deprecated. Use %s instead.", agentDaemonsetTolerationEnv, agentDaemonsetTolerationKeyEnv, agentDaemonsetTolerationsEnv)
 		ds.Spec.Template.Spec.Tolerations = []v1.Toleration{
 			{
 				Effect:   v1.TaintEffect(tolerationValue),
@@ -239,6 +241,14 @@ func (a *Agent) createAgentDaemonSet(namespace, agentImage, serviceAccount strin
 			},
 		}
 	}
+
+	var tolerations []v1.Toleration
+	tolerationsRaw := os.Getenv(agentDaemonsetTolerationsEnv)
+	err = k8sutil.YamlToTolerations(tolerationsRaw, &tolerations)
+	if err != nil {
+		logger.Warningf("failed to parse %s", tolerationsRaw)
+	}
+	ds.Spec.Template.Spec.Tolerations = append(ds.Spec.Template.Spec.Tolerations, tolerations...)
 
 	_, err = a.clientset.AppsV1().DaemonSets(namespace).Create(ds)
 	if err != nil {
