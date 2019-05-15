@@ -75,15 +75,83 @@ func (c *ClientController) StartWatch(stopCh chan struct{}) error {
 }
 
 func (c *ClientController) onAdd(obj interface{}) {
-	logger.Infof("new client resource added")
-	/*err = createPool(c.context, client)
+	logger.Infof("new client onAdd() called")
+
+	client, err := getClientObject(obj)
+	if err != nil {
+		logger.Errorf("failed to get client object: %+v", err)
+		return
+	}
+
+	err = createClient(c.context, client)
 	if err != nil {
 		logger.Errorf("failed to create client %s. %+v", client.ObjectMeta.Name, err)
-	}*/
+	}
+}
+
+// Create the client
+func createClient(context *clusterd.Context, p *cephv1.CephClient) error {
+	// validate the client settings
+	if err := ValidateClient(context, p); err != nil {
+		return fmt.Errorf("invalid client %s arguments. %+v", p.Name, err)
+	}
+
+	// create the client
+	logger.Infof("creating client %s in namespace %s", p.Name, p.Namespace)
+
+	clientEntity := fmt.Sprintf("client.%s", p.Name)
+	caps := []string{}
+	if p.Spec.Caps.Osd != "" {
+		caps = append(caps, "osd", p.Spec.Caps.Osd)
+	}
+	if p.Spec.Caps.Mon != "" {
+		caps = append(caps, "mon", p.Spec.Caps.Mon)
+	}
+	if p.Spec.Caps.Mds != "" {
+		caps = append(caps, "mds", p.Spec.Caps.Mds)
+	}
+
+	err := ceph.AuthGetOrCreateNoKeyring(context, p.Namespace, clientEntity, caps)
+	if err != nil {
+		return fmt.Errorf("failed to create client %s. %+v", p.Name, err)
+	}
+
+	logger.Infof("created client %s", p.Name)
+	return nil
+}
+
+func updateClient(context *clusterd.Context, p *cephv1.CephClient) error {
+	// validate the client settings
+	if err := ValidateClient(context, p); err != nil {
+		return fmt.Errorf("invalid client %s arguments. %+v", p.Name, err)
+	}
+
+	// update the client
+	logger.Infof("updating client %s in namespace %s", p.Name, p.Namespace)
+
+	clientEntity := fmt.Sprintf("client.%s", p.Name)
+	caps := []string{}
+	if p.Spec.Caps.Osd != "" {
+		caps = append(caps, "osd", p.Spec.Caps.Osd)
+	}
+	if p.Spec.Caps.Mon != "" {
+		caps = append(caps, "mon", p.Spec.Caps.Mon)
+	}
+	if p.Spec.Caps.Mds != "" {
+		caps = append(caps, "mds", p.Spec.Caps.Mds)
+	}
+
+	err := ceph.AuthUpdateCaps(context, p.Namespace, clientEntity, caps)
+	if err != nil {
+		return fmt.Errorf("failed to update client %s. %+v", p.Name, err)
+	}
+
+	logger.Infof("updated client %s", p.Name)
+	return nil
 }
 
 func (c *ClientController) onUpdate(oldObj, newObj interface{}) {
-	oldPool, err := getClientObject(oldObj)
+	oldClient, err := getClientObject(oldObj)
 	if err != nil {
 		logger.Errorf("failed to get old client object: %+v", err)
 		return
@@ -94,20 +162,19 @@ func (c *ClientController) onUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
-	if oldPool.Name != client.Name {
+	if oldClient.Name != client.Name {
 		logger.Errorf("failed to update client %s. name update not allowed", client.Name)
 		return
 	}
-	if !clientChanged(oldPool.Spec, client.Spec) {
+	if !clientChanged(oldClient.Spec, client.Spec) {
 		logger.Debugf("client %s not changed", client.Name)
 		return
 	}
 
-	// if the client is modified, allow the client to be created if it wasn't already
-	/*logger.Infof("updating client %s", client.Name)
-	if err := createPool(c.context, client); err != nil {
-		logger.Errorf("failed to create (modify) client %s. %+v", client.ObjectMeta.Name, err)
-	}*/
+	logger.Infof("updating client %s", client.Name)
+	if err := updateClient(c.context, client); err != nil {
+		logger.Errorf("failed to update client %s. %+v", client.ObjectMeta.Name, err)
+	}
 }
 
 func (c *ClientController) ParentClusterChanged(cluster cephv1.ClusterSpec, clusterInfo *cephconfig.ClusterInfo) {
@@ -115,55 +182,49 @@ func (c *ClientController) ParentClusterChanged(cluster cephv1.ClusterSpec, clus
 }
 
 func clientChanged(old, new cephv1.ClientSpec) bool {
-	/*if old.Replicated.Size != new.Replicated.Size {
-		logger.Infof("client replication changed from %d to %d", old.Replicated.Size, new.Replicated.Size)
+	if old.Caps.Mon != new.Caps.Mon {
+		logger.Infof("client mon caps changed from '%s' to '%s'", old.Caps.Mon, new.Caps.Mon)
 		return true
-	}*/
+	}
+	if old.Caps.Osd != new.Caps.Osd {
+		logger.Infof("client osd caps changed from '%s' to '%s'", old.Caps.Osd, new.Caps.Osd)
+		return true
+	}
+	if old.Caps.Mon != new.Caps.Mon {
+		logger.Infof("client mds caps changed from '%s' to '%s'", old.Caps.Mds, new.Caps.Mds)
+		return true
+	}
+
 	return false
 }
 
 func (c *ClientController) onDelete(obj interface{}) {
-	logger.Infof("Going to remove client object")
 	client, err := getClientObject(obj)
 	if err != nil {
 		logger.Errorf("failed to get client object: %+v", err)
 		return
 	}
 
-	if err := deletePool(c.context, client); err != nil {
+	logger.Infof("Going to remove client object %s", client.Name)
+	if err := deleteClient(c.context, client); err != nil {
 		logger.Errorf("failed to delete client %s. %+v", client.ObjectMeta.Name, err)
 	}
+	logger.Infof("Removed client %s", client.Name)
 }
 
-// Create the client
-/*func createPool(context *clusterd.Context, p *cephv1.CephBlockPool) error {
-	// validate the client settings
-	if err := ValidatePool(context, p); err != nil {
-		return fmt.Errorf("invalid client %s arguments. %+v", p.Name, err)
-	}
-
-	// create the client
-	logger.Infof("creating client %s in namespace %s", p.Name, p.Namespace)
-	if err := ceph.CreatePoolWithProfile(context, p.Namespace, *p.Spec.ToModel(p.Name), clientApplicationNameRBD); err != nil {
-		return fmt.Errorf("failed to create client %s. %+v", p.Name, err)
-	}
-
-	logger.Infof("created client %s", p.Name)
-	return nil
-}*/
-
 // Delete the client
-func deletePool(context *clusterd.Context, p *cephv1.CephClient) error {
-
-	/*if err := ceph.DeletePool(context, p.Namespace, p.Name); err != nil {
+func deleteClient(context *clusterd.Context, p *cephv1.CephClient) error {
+	clientEntity := fmt.Sprintf("client.%s", p.Name)
+	if err := ceph.AuthDelete(context, p.Namespace, clientEntity); err != nil {
 		return fmt.Errorf("failed to delete client '%s'. %+v", p.Name, err)
-	}*/
-
+	}
+	// TODO Remove corresponding secret as well
 	return nil
 }
 
 // Check if the client exists
 func clientExists(context *clusterd.Context, p *cephv1.CephClient) (bool, error) {
+	// TODO implement get clients
 	clients, err := ceph.GetPools(context, p.Namespace)
 	if err != nil {
 		return false, err
@@ -176,18 +237,8 @@ func clientExists(context *clusterd.Context, p *cephv1.CephClient) (bool, error)
 	return false, nil
 }
 
-func ModelToSpec(client model.Pool) cephv1.PoolSpec {
-	ec := client.ErasureCodedConfig
-	return cephv1.PoolSpec{
-		FailureDomain: client.FailureDomain,
-		CrushRoot:     client.CrushRoot,
-		Replicated:    cephv1.ReplicatedSpec{Size: client.ReplicatedConfig.Size},
-		ErasureCoded:  cephv1.ErasureCodedSpec{CodingChunks: ec.CodingChunkCount, DataChunks: ec.DataChunkCount, Algorithm: ec.Algorithm},
-	}
-}
-
 // Validate the client arguments
-func ValidatePool(context *clusterd.Context, p *cephv1.CephClient) error {
+func ValidateClient(context *clusterd.Context, p *cephv1.CephClient) error {
 	if p.Name == "" {
 		return fmt.Errorf("missing name")
 	}
@@ -201,50 +252,9 @@ func ValidatePool(context *clusterd.Context, p *cephv1.CephClient) error {
 }
 
 func ValidateClientSpec(context *clusterd.Context, namespace string, p *cephv1.ClientSpec) error {
-	/*if p.Replication() != nil && p.ErasureCode() != nil {
-		return fmt.Errorf("both replication and erasure code settings cannot be specified")
+	if p.Caps.Mon == "" && p.Caps.Osd == "" && p.Caps.Mds == "" {
+		return fmt.Errorf("no caps specified")
 	}
-	if p.Replication() == nil && p.ErasureCode() == nil {
-		return fmt.Errorf("neither replication nor erasure code settings were specified")
-	}
-
-	var crush ceph.CrushMap
-	var err error
-	if p.FailureDomain != "" || p.CrushRoot != "" {
-		crush, err = ceph.GetCrushMap(context, namespace)
-		if err != nil {
-			return fmt.Errorf("failed to get crush map. %+v", err)
-		}
-	}
-
-	// validate the failure domain if specified
-	if p.FailureDomain != "" {
-		found := false
-		for _, t := range crush.Types {
-			if t.Name == p.FailureDomain {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("unrecognized failure domain %s", p.FailureDomain)
-		}
-	}
-
-	// validate the crush root if specified
-	if p.CrushRoot != "" {
-		found := false
-		for _, t := range crush.Buckets {
-			if t.Name == p.CrushRoot {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("unrecognized crush root %s", p.CrushRoot)
-		}
-	}
-	*/
 	return nil
 }
 
