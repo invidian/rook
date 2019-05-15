@@ -30,6 +30,7 @@ import (
 	"github.com/rook/rook/pkg/clusterd"
 	"github.com/rook/rook/pkg/daemon/ceph/agent/flexvolume/attachment"
 	discoverDaemon "github.com/rook/rook/pkg/daemon/discover"
+	"github.com/rook/rook/pkg/operator/ceph/client"
 	"github.com/rook/rook/pkg/operator/ceph/cluster/mon"
 	"github.com/rook/rook/pkg/operator/ceph/cluster/osd"
 	"github.com/rook/rook/pkg/operator/ceph/file"
@@ -314,6 +315,10 @@ func (c *ClusterController) onAdd(obj interface{}) {
 		return
 	}
 
+	// Start client CRD watcher
+	clientController := client.NewClientController(c.context, cluster.Namespace)
+	clientController.StartWatch(cluster.stopCh)
+
 	// Start pool CRD watcher
 	poolController := pool.NewPoolController(c.context, cluster.Namespace)
 	poolController.StartWatch(cluster.stopCh)
@@ -335,7 +340,7 @@ func (c *ClusterController) onAdd(obj interface{}) {
 	ganeshaController.StartWatch(cluster.stopCh)
 
 	cluster.childControllers = []childController{
-		poolController, objectStoreController, objectStoreUserController, fileController, ganeshaController,
+		clientController, poolController, objectStoreController, objectStoreUserController, fileController, ganeshaController,
 	}
 
 	// Start mon health checker
