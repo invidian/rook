@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package pool to manage a rook pool.
+// Package client to manage a rook client.
 package client
 
 import (
@@ -44,13 +44,13 @@ var ClientResource = opkit.CustomResource{
 	Kind:    reflect.TypeOf(cephv1.CephClient{}).Name(),
 }
 
-// ClientController represents a controller object for pool custom resources
+// ClientController represents a controller object for client custom resources
 type ClientController struct {
 	context   *clusterd.Context
 	namespace string
 }
 
-// NewClientController create controller for watching pool custom resources created
+// NewClientController create controller for watching client custom resources created
 func NewClientController(context *clusterd.Context, namespace string) *ClientController {
 	return &ClientController{
 		context:   context,
@@ -67,7 +67,7 @@ func (c *ClientController) StartWatch(stopCh chan struct{}) error {
 		DeleteFunc: c.onDelete,
 	}
 
-	logger.Infof("start watching pool resources in namespace %s", c.namespace)
+	logger.Infof("start watching client resources in namespace %s", c.namespace)
 	watcher := opkit.NewWatcher(ClientResource, c.namespace, resourceHandlerFuncs, c.context.RookClientset.CephV1().RESTClient())
 	go watcher.Watch(&cephv1.CephClient{}, stopCh)
 
@@ -75,116 +75,118 @@ func (c *ClientController) StartWatch(stopCh chan struct{}) error {
 }
 
 func (c *ClientController) onAdd(obj interface{}) {
-	/*err = createPool(c.context, pool)
+	logger.Infof("new client resource added")
+	/*err = createPool(c.context, client)
 	if err != nil {
-		logger.Errorf("failed to create pool %s. %+v", pool.ObjectMeta.Name, err)
+		logger.Errorf("failed to create client %s. %+v", client.ObjectMeta.Name, err)
 	}*/
 }
 
 func (c *ClientController) onUpdate(oldObj, newObj interface{}) {
 	oldPool, err := getClientObject(oldObj)
 	if err != nil {
-		logger.Errorf("failed to get old pool object: %+v", err)
+		logger.Errorf("failed to get old client object: %+v", err)
 		return
 	}
-	pool, err := getClientObject(newObj)
+	client, err := getClientObject(newObj)
 	if err != nil {
-		logger.Errorf("failed to get new pool object: %+v", err)
+		logger.Errorf("failed to get new client object: %+v", err)
 		return
 	}
 
-	if oldPool.Name != pool.Name {
-		logger.Errorf("failed to update pool %s. name update not allowed", pool.Name)
+	if oldPool.Name != client.Name {
+		logger.Errorf("failed to update client %s. name update not allowed", client.Name)
 		return
 	}
-	if !poolChanged(oldPool.Spec, pool.Spec) {
-		logger.Debugf("pool %s not changed", pool.Name)
+	if !clientChanged(oldPool.Spec, client.Spec) {
+		logger.Debugf("client %s not changed", client.Name)
 		return
 	}
 
-	// if the pool is modified, allow the pool to be created if it wasn't already
-	/*logger.Infof("updating pool %s", pool.Name)
-	if err := createPool(c.context, pool); err != nil {
-		logger.Errorf("failed to create (modify) pool %s. %+v", pool.ObjectMeta.Name, err)
+	// if the client is modified, allow the client to be created if it wasn't already
+	/*logger.Infof("updating client %s", client.Name)
+	if err := createPool(c.context, client); err != nil {
+		logger.Errorf("failed to create (modify) client %s. %+v", client.ObjectMeta.Name, err)
 	}*/
 }
 
 func (c *ClientController) ParentClusterChanged(cluster cephv1.ClusterSpec, clusterInfo *cephconfig.ClusterInfo) {
-	logger.Debugf("No need to update the pool after the parent cluster changed")
+	logger.Debugf("No need to update the client after the parent cluster changed")
 }
 
-func poolChanged(old, new cephv1.ClientSpec) bool {
+func clientChanged(old, new cephv1.ClientSpec) bool {
 	/*if old.Replicated.Size != new.Replicated.Size {
-		logger.Infof("pool replication changed from %d to %d", old.Replicated.Size, new.Replicated.Size)
+		logger.Infof("client replication changed from %d to %d", old.Replicated.Size, new.Replicated.Size)
 		return true
 	}*/
 	return false
 }
 
 func (c *ClientController) onDelete(obj interface{}) {
-	pool, err := getClientObject(obj)
+	logger.Infof("Going to remove client object")
+	client, err := getClientObject(obj)
 	if err != nil {
 		logger.Errorf("failed to get client object: %+v", err)
 		return
 	}
 
-	if err := deletePool(c.context, pool); err != nil {
-		logger.Errorf("failed to delete pool %s. %+v", pool.ObjectMeta.Name, err)
+	if err := deletePool(c.context, client); err != nil {
+		logger.Errorf("failed to delete client %s. %+v", client.ObjectMeta.Name, err)
 	}
 }
 
-// Create the pool
+// Create the client
 /*func createPool(context *clusterd.Context, p *cephv1.CephBlockPool) error {
-	// validate the pool settings
+	// validate the client settings
 	if err := ValidatePool(context, p); err != nil {
-		return fmt.Errorf("invalid pool %s arguments. %+v", p.Name, err)
+		return fmt.Errorf("invalid client %s arguments. %+v", p.Name, err)
 	}
 
-	// create the pool
-	logger.Infof("creating pool %s in namespace %s", p.Name, p.Namespace)
-	if err := ceph.CreatePoolWithProfile(context, p.Namespace, *p.Spec.ToModel(p.Name), poolApplicationNameRBD); err != nil {
-		return fmt.Errorf("failed to create pool %s. %+v", p.Name, err)
+	// create the client
+	logger.Infof("creating client %s in namespace %s", p.Name, p.Namespace)
+	if err := ceph.CreatePoolWithProfile(context, p.Namespace, *p.Spec.ToModel(p.Name), clientApplicationNameRBD); err != nil {
+		return fmt.Errorf("failed to create client %s. %+v", p.Name, err)
 	}
 
-	logger.Infof("created pool %s", p.Name)
+	logger.Infof("created client %s", p.Name)
 	return nil
 }*/
 
-// Delete the pool
+// Delete the client
 func deletePool(context *clusterd.Context, p *cephv1.CephClient) error {
 
 	/*if err := ceph.DeletePool(context, p.Namespace, p.Name); err != nil {
-		return fmt.Errorf("failed to delete pool '%s'. %+v", p.Name, err)
+		return fmt.Errorf("failed to delete client '%s'. %+v", p.Name, err)
 	}*/
 
 	return nil
 }
 
-// Check if the pool exists
-func poolExists(context *clusterd.Context, p *cephv1.CephClient) (bool, error) {
-	pools, err := ceph.GetPools(context, p.Namespace)
+// Check if the client exists
+func clientExists(context *clusterd.Context, p *cephv1.CephClient) (bool, error) {
+	clients, err := ceph.GetPools(context, p.Namespace)
 	if err != nil {
 		return false, err
 	}
-	for _, pool := range pools {
-		if pool.Name == p.Name {
+	for _, client := range clients {
+		if client.Name == p.Name {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func ModelToSpec(pool model.Pool) cephv1.PoolSpec {
-	ec := pool.ErasureCodedConfig
+func ModelToSpec(client model.Pool) cephv1.PoolSpec {
+	ec := client.ErasureCodedConfig
 	return cephv1.PoolSpec{
-		FailureDomain: pool.FailureDomain,
-		CrushRoot:     pool.CrushRoot,
-		Replicated:    cephv1.ReplicatedSpec{Size: pool.ReplicatedConfig.Size},
+		FailureDomain: client.FailureDomain,
+		CrushRoot:     client.CrushRoot,
+		Replicated:    cephv1.ReplicatedSpec{Size: client.ReplicatedConfig.Size},
 		ErasureCoded:  cephv1.ErasureCodedSpec{CodingChunks: ec.CodingChunkCount, DataChunks: ec.DataChunkCount, Algorithm: ec.Algorithm},
 	}
 }
 
-// Validate the pool arguments
+// Validate the client arguments
 func ValidatePool(context *clusterd.Context, p *cephv1.CephClient) error {
 	if p.Name == "" {
 		return fmt.Errorf("missing name")
@@ -250,7 +252,7 @@ func getClientObject(obj interface{}) (client *cephv1.CephClient, err error) {
 	var ok bool
 	client, ok = obj.(*cephv1.CephClient)
 	if ok {
-		// the pool object is of the latest type, simply return it
+		// the client object is of the latest type, simply return it
 		return client.DeepCopy(), nil
 	}
 
