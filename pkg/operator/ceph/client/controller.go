@@ -27,8 +27,11 @@ import (
 	"github.com/rook/rook/pkg/clusterd"
 	ceph "github.com/rook/rook/pkg/daemon/ceph/client"
 	cephconfig "github.com/rook/rook/pkg/daemon/ceph/config"
-	"github.com/rook/rook/pkg/daemon/ceph/model"
+	"github.com/rook/rook/pkg/operator/k8sutil"
+	"k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -83,16 +86,16 @@ func (c *ClientController) onAdd(obj interface{}) {
 		return
 	}
 
-	err = createClient(c.context, client)
+	err = createClient(c, client)
 	if err != nil {
 		logger.Errorf("failed to create client %s. %+v", client.ObjectMeta.Name, err)
 	}
 }
 
 // Create the client
-func createClient(context *clusterd.Context, p *cephv1.CephClient) error {
+func createClient(c *ClientController, p *cephv1.CephClient) error {
 	// validate the client settings
-	if err := ValidateClient(context, p); err != nil {
+	if err := ValidateClient(c.context, p); err != nil {
 		return fmt.Errorf("invalid client %s arguments. %+v", p.Name, err)
 	}
 
@@ -111,9 +114,38 @@ func createClient(context *clusterd.Context, p *cephv1.CephClient) error {
 		caps = append(caps, "mds", p.Spec.Caps.Mds)
 	}
 
-	err := ceph.AuthGetOrCreateNoKeyring(context, p.Namespace, clientEntity, caps)
+	// Example in pkg/operator/ceph/config/keyring/store.go:65
+	key, err := ceph.AuthGetOrCreateKey(c.context, p.Namespace, clientEntity, caps)
 	if err != nil {
 		return fmt.Errorf("failed to create client %s. %+v", p.Name, err)
+	}
+
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-client-key", p.Name),
+			Namespace: p.Namespace,
+		},
+		StringData: map[string]string{
+			p.Name: key,
+		},
+		Type: k8sutil.RookType,
+	}
+
+	secretName := secret.ObjectMeta.Name
+	_, err = c.context.Clientset.CoreV1().Secrets(p.Namespace).Get(secretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Debugf("creating secret for %s", secretName)
+			if _, err := c.context.Clientset.CoreV1().Secrets(p.Namespace).Create(secret); err != nil {
+				return fmt.Errorf("failed to create secret for %s. %+v", secretName, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get secret for %s. %+v", secretName, err)
+	}
+	logger.Debugf("updating secret for %s", secretName)
+	if _, err := c.context.Clientset.CoreV1().Secrets(p.Namespace).Update(secret); err != nil {
+		return fmt.Errorf("failed to update secret for %s. %+v", secretName, err)
 	}
 
 	logger.Infof("created client %s", p.Name)
@@ -219,6 +251,11 @@ func deleteClient(context *clusterd.Context, p *cephv1.CephClient) error {
 		return fmt.Errorf("failed to delete client '%s'. %+v", p.Name, err)
 	}
 	// TODO Remove corresponding secret as well
+	secretName := fmt.Sprintf("%s-client-key", p.Name)
+	if err := context.Clientset.CoreV1().Secrets(p.Namespace).Delete(secretName, &metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("failed to remote client %s secret %s", p.Name, secretName)
+	}
+
 	return nil
 }
 
